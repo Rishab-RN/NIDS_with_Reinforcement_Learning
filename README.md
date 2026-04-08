@@ -1,3 +1,13 @@
+---
+title: NIDS OpenEnv
+emoji: 🛡️
+colorFrom: blue
+colorTo: red
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # 🛡️ NIDS OpenEnv — Network Intrusion Detection System
 
 > A real-world OpenEnv environment where an AI agent learns to detect, block,
