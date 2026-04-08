@@ -1,0 +1,17 @@
+spec_version: 1
+name: nids_env
+type: typed
+runtime: docker
+description: >
+  Network Intrusion Detection System (NIDS) environment for RL post-training.
+  An AI agent monitors simulated network traffic and must classify packets as
+  benign or malicious, block threats, and escalate critical incidents — across
+  three difficulty levels.
+app: server/app.py
+port: 8000
+tags:
+  - cybersecurity
+  - network
+  - intrusion-detection
+  - real-world
+author: Hacktivators

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nids-env"
+version = "1.0.0"
+description = "Network Intrusion Detection OpenEnv environment"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.7",
+    "requests>=2.31",
+    "openai>=1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
