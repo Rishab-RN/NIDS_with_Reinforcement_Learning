@@ -2,15 +2,17 @@
 inference.py — NIDS OpenEnv inference script.
 
 Runs an LLM agent against all 3 tasks and emits structured stdout logs
-in the exact [START] / [STEP] / [END] format required by the judges.
+in the exact [START] / [STEP] / [END] key=value format required by judges.
+
+STDOUT FORMAT:
+    [START] task=<task_name> env=<benchmark> model=<model_name>
+    [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+    [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 
 Environment variables required:
-  API_BASE_URL  — LLM API base URL  (e.g. https://api.openai.com/v1)
-  MODEL_NAME    — model identifier  (e.g. gpt-4o-mini)
+  API_BASE_URL  — LLM API base URL
+  MODEL_NAME    — model identifier
   HF_TOKEN      — Hugging Face / API key
-
-Usage:
-  python inference.py [--url http://localhost:8000]
 """
 from __future__ import annotations
 
@@ -23,14 +25,15 @@ import requests
 from openai import OpenAI
 
 # ---------------------------------------------------------------------------
-# Config
+# Config — Defaults only for API_BASE_URL and MODEL_NAME (not HF_TOKEN)
 # ---------------------------------------------------------------------------
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME   = os.environ.get("MODEL_NAME",   "gpt-4o-mini")
-HF_TOKEN     = os.environ.get("HF_TOKEN")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
+HF_TOKEN     = os.getenv("HF_TOKEN")
 
-TASKS = ["easy_classification", "medium_adaptive", "hard_stealth"]
+BENCHMARK    = "nids_env"
+TASKS        = ["easy_classification", "medium_adaptive", "hard_stealth"]
 
 # ---------------------------------------------------------------------------
 # LLM agent
@@ -142,25 +145,17 @@ def env_grade(base_url: str, task_name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Run one task episode  — strict [START] / [STEP] / [END] log format
+# Run one task — exact [START] / [STEP] / [END] key=value format
 # ---------------------------------------------------------------------------
-
-def _log(tag: str, payload: dict) -> None:
-    """Emit a single judge-format log line: [TAG] <json>"""
-    print(f"[{tag}] {json.dumps(payload)}", flush=True)
-
 
 def run_task(base_url: str, task_name: str) -> dict:
     # ── [START] ──────────────────────────────────────────────────────────────
-    _log("START", {
-        "task":      task_name,
-        "model":     MODEL_NAME,
-        "timestamp": time.time(),
-    })
+    print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}", flush=True)
 
     obs     = env_reset(base_url, task_name)
     step_no = 0
     done    = False
+    rewards_list = []
 
     while not done:
         action = llm_decide(obs)
@@ -168,34 +163,33 @@ def run_task(base_url: str, task_name: str) -> dict:
         done   = result.get("done", False)
         reward = result.get("reward", 0.0)
         step_no += 1
+        rewards_list.append(reward)
+
+        action_str = action.get("action_type", "unknown")
+        done_str   = "true" if done else "false"
+        error_str  = "null"
 
         # ── [STEP] ───────────────────────────────────────────────────────────
-        _log("STEP", {
-            "task":        task_name,
-            "step":        step_no,
-            "action_type": action.get("action_type"),
-            "reason":      action.get("reason", ""),
-            "reward":      reward,
-            "done":        done,
-            "message":     result.get("observation", {}).get("message", ""),
-        })
+        print(
+            f"[STEP] step={step_no} action={action_str} "
+            f"reward={reward:.2f} done={done_str} error={error_str}",
+            flush=True,
+        )
 
         obs = result
 
     grade = env_grade(base_url, task_name)
+    score = grade["score"]
+    success = score > 0.5
+    success_str = "true" if success else "false"
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards_list)
 
     # ── [END] ────────────────────────────────────────────────────────────────
-    _log("END", {
-        "task":           task_name,
-        "score":          grade["score"],
-        "reward":         grade["reward"],
-        "true_positives": grade["true_positives"],
-        "false_positives":grade["false_positives"],
-        "missed_threats": grade["missed_threats"],
-        "grade":          grade["grade"],
-        "steps_taken":    step_no,
-        "timestamp":      time.time(),
-    })
+    print(
+        f"[END] success={success_str} steps={step_no} "
+        f"score={score:.2f} rewards={rewards_str}",
+        flush=True,
+    )
 
     return grade
 
@@ -222,19 +216,9 @@ def main():
         print(f"[ERROR] Cannot reach environment at {base_url}: {e}", file=sys.stderr)
         sys.exit(1)
 
-    all_scores = []
     for task_name in TASKS:
-        grade = run_task(base_url, task_name)
-        all_scores.append(grade["score"])
+        run_task(base_url, task_name)
         time.sleep(0.5)
-
-    avg = sum(all_scores) / len(all_scores)
-    _log("SUMMARY", {
-        "tasks":   TASKS,
-        "scores":  all_scores,
-        "average": round(avg, 4),
-        "model":   MODEL_NAME,
-    })
 
 
 if __name__ == "__main__":

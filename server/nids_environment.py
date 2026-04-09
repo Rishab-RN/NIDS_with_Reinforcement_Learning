@@ -151,8 +151,9 @@ def _compute_reward(
     diff_bonus = {"easy": 0.0, "medium": 0.05, "hard": 0.1}[difficulty]
 
     raw = f1 + escalation_bonus + diff_bonus
-    # Clamp strictly within (0, 1) — validator rejects exactly 0.0 and 1.0
-    clamped = max(0.0001, min(raw, 0.9999))
+    # Clamp strictly within [0.01, 0.99] to avoid floating point or string formatting 
+    # making it look like 0.0 or 1.0, which the validator strictly rejects.
+    clamped = max(0.01, min(raw, 0.99))
     return round(clamped, 4)
 
 
