@@ -1,13 +1,5 @@
 """
-app.py — FastAPI server exposing OpenEnv HTTP endpoints.
-
-Endpoints:
-  POST /reset   — start new episode
-  POST /step    — submit action
-  GET  /state   — get current state
-  GET  /health  — liveness check
-  GET  /tasks   — list available tasks & graders
-  POST /grade   — run grader for a completed episode
+app.py — FastAPI server exposing OpenEnv HTTP endpoints for NIDS environment.
 """
 import sys
 import os
@@ -23,17 +15,12 @@ from server.nids_environment import NIDSEnvironment, TASKS, grade_task
 
 app = FastAPI(
     title="NIDS OpenEnv",
-    description="Network Intrusion Detection System — OpenEnv hackathon submission",
+    description="Network Intrusion Detection System — OpenEnv environment",
     version="1.0.0",
 )
 
-# Single shared environment instance (SUPPORTS_CONCURRENT_SESSIONS=False)
 _env: Optional[NIDSEnvironment] = None
 
-
-# ---------------------------------------------------------------------------
-# Request / Response helpers
-# ---------------------------------------------------------------------------
 
 class ResetRequest(BaseModel):
     task_name: str = "easy_classification"
@@ -46,10 +33,6 @@ class StepResponse(BaseModel):
     state:       dict
     info:        dict
 
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 @app.get("/")
 async def root():
@@ -109,7 +92,6 @@ async def step(action: NIDSAction):
     obs = _env.step(action)
     st  = _env.state()
 
-    # Compute partial reward at every step
     from server.nids_environment import _compute_reward, TASKS as _TASKS
     cfg    = _TASKS[_env.task_name]
     reward = _compute_reward(
@@ -140,15 +122,11 @@ async def grade(task_name: str | None = None):
     global _env
     if _env is None:
         raise HTTPException(status_code=400, detail="No active episode to grade.")
-    # Always grade against the environment's actual task — ignore any stale param
     effective_task = _env.task_name
     result = grade_task(effective_task, _env.get_episode_data())
     return result
 
 
-# ---------------------------------------------------------------------------
-# Run
-# ---------------------------------------------------------------------------
 def main():
     import uvicorn
     uvicorn.run("server.app:app", host="0.0.0.0", port=8000, reload=False)
