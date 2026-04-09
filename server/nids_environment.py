@@ -151,7 +151,9 @@ def _compute_reward(
     diff_bonus = {"easy": 0.0, "medium": 0.05, "hard": 0.1}[difficulty]
 
     raw = f1 + escalation_bonus + diff_bonus
-    return round(min(raw, 1.0), 4)
+    # Clamp strictly within (0, 1) — validator rejects exactly 0.0 and 1.0
+    clamped = max(0.0001, min(raw, 0.9999))
+    return round(clamped, 4)
 
 
 def grade_task(task_name: str, episode_data: dict) -> dict:
