@@ -1,13 +1,12 @@
 """
 nids_environment.py — Server-side NIDS Environment implementation.
-Three tasks (easy → medium → hard), each with its own grader.
+Five tasks (easy → expert), each with its own grader.
 """
 from __future__ import annotations
 
 import random
 import uuid
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from models import (
     ActionType, NIDSAction, NIDSObservation, NIDSState,
@@ -15,9 +14,9 @@ from models import (
 )
 
 
-_BENIGN_PORTS   = [80, 443, 22, 25, 53, 8080]
+_BENIGN_PORTS    = [80, 443, 22, 25, 53, 8080]
 _MALICIOUS_PORTS = [4444, 31337, 6666, 1337, 9999]
-_PROTOCOLS      = list(PacketProtocol)
+_PROTOCOLS       = list(PacketProtocol)
 
 
 def _random_ip() -> str:
@@ -36,10 +35,27 @@ def _make_packet(malicious: bool, difficulty: str) -> Tuple[PacketFeatures, bool
         anomaly_score = random.uniform(0.6, 1.0)
         flags         = random.sample(["SYN", "FIN", "RST", "PSH", "URG"],
                                       k=random.randint(2, 4))
+
         if difficulty == "hard":
             anomaly_score = max(0.0, anomaly_score - random.uniform(0.2, 0.4))
             entropy       = max(0.0, entropy - random.uniform(1.0, 2.0))
             conn_count    = max(1, conn_count - random.randint(30, 45))
+
+        elif difficulty == "expert":
+            anomaly_score = random.uniform(0.05, 0.30)
+            entropy       = random.uniform(3.5, 5.0)
+            conn_count    = random.randint(5, 25)
+            src_port      = random.choice(_BENIGN_PORTS + _MALICIOUS_PORTS)
+            flags         = random.sample(["SYN", "ACK", "FIN", "RST", "PSH"],
+                                          k=random.randint(1, 3))
+
+        elif difficulty == "adaptive":
+            if random.random() < 0.3:
+                src_port      = random.choice(_BENIGN_PORTS)
+                anomaly_score = random.uniform(0.15, 0.40)
+                entropy       = random.uniform(4.0, 5.5)
+            else:
+                anomaly_score = max(0.0, anomaly_score - random.uniform(0.1, 0.25))
     else:
         src_port      = random.randint(1024, 65535)
         dst_port      = random.choice(_BENIGN_PORTS)
@@ -51,8 +67,17 @@ def _make_packet(malicious: bool, difficulty: str) -> Tuple[PacketFeatures, bool
         conn_count    = random.randint(1, 20)
         anomaly_score = random.uniform(0.0, 0.35)
         flags         = random.sample(["SYN", "ACK"], k=random.randint(1, 2))
+
         if difficulty == "hard":
             anomaly_score = min(1.0, anomaly_score + random.uniform(0.1, 0.2))
+
+        elif difficulty == "expert":
+            anomaly_score = min(1.0, anomaly_score + random.uniform(0.15, 0.35))
+            entropy       = random.uniform(4.5, 6.5)
+            conn_count    = random.randint(10, 60)
+
+        elif difficulty == "adaptive":
+            anomaly_score = min(1.0, anomaly_score + random.uniform(0.05, 0.15))
 
     return PacketFeatures(
         src_ip           = _random_ip(),
@@ -101,24 +126,56 @@ TASKS: Dict[str, dict] = {
             "scores on real threats. Agent must use multi-feature reasoning."
         ),
     },
+    "expert_zeroday": {
+        "difficulty":       "expert",
+        "max_steps":        50,
+        "threat_ratio":     0.30,
+        "inspect_tokens":   1,
+        "description": (
+            "Zero-day attacks with novel signatures. Anomaly scores are nearly "
+            "indistinguishable between benign and malicious. Agent must rely "
+            "on behavioral patterns across multiple features simultaneously."
+        ),
+    },
+    "adaptive_evasion": {
+        "difficulty":       "adaptive",
+        "max_steps":        35,
+        "threat_ratio":     0.40,
+        "inspect_tokens":   2,
+        "description": (
+            "Evasive attacker that mimics benign traffic patterns. Some "
+            "malicious packets use benign ports and low entropy to evade "
+            "detection. Demands high precision under deception."
+        ),
+    },
 }
 
 
 def _compute_reward(
     tp: int, fp: int, missed: int, escalations: int,
     max_steps: int, difficulty: str,
+    streak: int = 0, steps_taken: int = 0,
 ) -> float:
-    total_decisions = max(tp + fp + missed, 1)
-
     precision_score = tp / max(tp + fp, 1)
     recall_score    = tp / max(tp + missed, 1)
     f1              = (2 * precision_score * recall_score /
                        max(precision_score + recall_score, 1e-9))
 
     escalation_bonus = min(escalations * 0.05, 0.1)
-    diff_bonus = {"easy": 0.0, "medium": 0.05, "hard": 0.1}[difficulty]
 
-    raw = f1 + escalation_bonus + diff_bonus
+    diff_bonus = {
+        "easy": 0.0, "medium": 0.05, "hard": 0.1,
+        "expert": 0.15, "adaptive": 0.08,
+    }[difficulty]
+
+    streak_bonus = min(streak * 0.01, 0.05)
+
+    efficiency = 1.0
+    if max_steps > 0 and steps_taken > 0:
+        efficiency = min(steps_taken / max_steps, 1.0)
+    efficiency_bonus = (1.0 - efficiency) * 0.05
+
+    raw = f1 + escalation_bonus + diff_bonus + streak_bonus + efficiency_bonus
     clamped = max(0.01, min(raw, 0.99))
     return round(clamped, 4)
 
@@ -131,8 +188,12 @@ def grade_task(task_name: str, episode_data: dict) -> dict:
     missed = episode_data["missed_threats"]
     esc    = episode_data["escalations_used"]
     steps  = episode_data["step_count"]
+    streak = episode_data.get("best_streak", 0)
 
-    score = _compute_reward(tp, fp, missed, esc, task["max_steps"], diff)
+    score = _compute_reward(
+        tp, fp, missed, esc, task["max_steps"], diff,
+        streak=streak, steps_taken=steps,
+    )
 
     return {
         "task":             task_name,
@@ -144,6 +205,7 @@ def grade_task(task_name: str, episode_data: dict) -> dict:
         "missed_threats":   missed,
         "escalations_used": esc,
         "steps_taken":      steps,
+        "best_streak":      streak,
         "grade": (
             "EXCELLENT" if score >= 0.85 else
             "GOOD"      if score >= 0.65 else
@@ -169,6 +231,8 @@ class NIDSEnvironment:
         self.missed_threats  = 0
         self.escalations     = 0
         self.inspect_tokens  = self.task_cfg["inspect_tokens"]
+        self.current_streak  = 0
+        self.best_streak     = 0
         self._packet_queue: List[Tuple[PacketFeatures, bool]] = []
         self._pre_generate_episode()
 
@@ -209,7 +273,9 @@ class NIDSEnvironment:
         pkt, is_malicious = self._packet_queue[self.step_count]
         self.step_count  += 1
 
+        correct = False
         msg_parts = []
+
         if action.action_type == ActionType.INSPECT:
             if self.inspect_tokens > 0:
                 self.inspect_tokens -= 1
@@ -221,26 +287,38 @@ class NIDSEnvironment:
                 msg_parts.append("[INSPECT] No tokens left. Packet auto-allowed.")
                 if is_malicious:
                     self.missed_threats += 1
+
         elif action.action_type == ActionType.BLOCK:
             if is_malicious:
                 self.true_positives += 1
+                correct = True
                 msg_parts.append("Correct BLOCK — threat neutralised.")
             else:
                 self.false_positives += 1
                 msg_parts.append("False positive — benign packet blocked.")
+
         elif action.action_type == ActionType.ALLOW:
             if is_malicious:
                 self.missed_threats += 1
                 msg_parts.append("Missed threat — malicious packet allowed through.")
             else:
+                correct = True
                 msg_parts.append("Correct ALLOW — benign packet passed.")
+
         elif action.action_type == ActionType.ESCALATE:
             self.escalations += 1
             if is_malicious:
                 self.true_positives += 1
+                correct = True
                 msg_parts.append("ESCALATED — threat correctly flagged for review.")
             else:
                 msg_parts.append("False escalation — benign packet escalated.")
+
+        if correct:
+            self.current_streak += 1
+            self.best_streak = max(self.best_streak, self.current_streak)
+        else:
+            self.current_streak = 0
 
         done = self.step_count >= self.task_cfg["max_steps"]
 
@@ -267,6 +345,7 @@ class NIDSEnvironment:
             self.true_positives, self.false_positives,
             self.missed_threats, self.escalations,
             self.task_cfg["max_steps"], self.task_cfg["difficulty"],
+            streak=self.best_streak, steps_taken=self.step_count,
         )
         return NIDSState(
             episode_id     = self.episode_id,
@@ -300,4 +379,5 @@ class NIDSEnvironment:
             "missed_threats":   self.missed_threats,
             "escalations_used": self.escalations,
             "step_count":       self.step_count,
+            "best_streak":      self.best_streak,
         }

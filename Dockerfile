@@ -1,14 +1,16 @@
-# ── NIDS OpenEnv — Hugging Face Spaces Dockerfile ────────────────────────────
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY server/requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml .
+COPY server/requirements.txt ./server/requirements.txt
 
-# Copy full source
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir -r server/requirements.txt
+
 COPY . .
+
+RUN pip install --no-cache-dir -e .
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app

@@ -18,7 +18,10 @@ MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.getenv("HF_TOKEN")
 
 BENCHMARK    = "nids_env"
-TASKS        = ["easy_classification", "medium_adaptive", "hard_stealth"]
+TASKS        = [
+    "easy_classification", "medium_adaptive", "hard_stealth",
+    "expert_zeroday", "adaptive_evasion",
+]
 VALID_ACTIONS = {"allow", "block", "escalate", "inspect"}
 
 client_llm = OpenAI(api_key=HF_TOKEN or "dummy", base_url=API_BASE_URL)
